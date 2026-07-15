@@ -21,6 +21,17 @@ body {
   font-family: "IBM Plex Sans KR", -apple-system, system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
+  /* 꾹 누를 때 텍스트 선택/하이라이트 방지 */
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+/* 입력창은 선택·편집 가능하게 예외 */
+input,
+textarea {
+  -webkit-user-select: text;
+  user-select: text;
 }
 
 .h-display {
