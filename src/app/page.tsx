@@ -161,6 +161,7 @@ export default function Home() {
 
   const carouselRef = useRef<HTMLDivElement>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const recognitionRef = useRef<SpeechRecognition | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -180,6 +181,8 @@ export default function Home() {
   useEffect(() => { channelsRef.current = channels; }, [channels]);
   useEffect(() => { currentIdRef.current = currentId; }, [currentId]);
   useEffect(() => { activeIdxRef.current = activeIdx; }, [activeIdx]);
+
+  useEffect(() => () => { streamRef.current?.getTracks().forEach((t) => t.stop()); }, []);
 
   useEffect(() => {
     const now = new Date();
@@ -218,6 +221,15 @@ export default function Home() {
     audioCtxRef.current = null; levelRef.current = 0; setLevel(0);
   }
 
+  // 마이크 스트림을 한 번 잡아두고 재사용 (권한 팝업이 hold를 끊는 문제 회피)
+  async function getMic(): Promise<MediaStream> {
+    const existing = streamRef.current;
+    if (existing && existing.getAudioTracks().some((t) => t.readyState === "live")) return existing;
+    const s = await navigator.mediaDevices.getUserMedia({ audio: true });
+    streamRef.current = s;
+    return s;
+  }
+
   async function startRecording() {
     if (isRecording) return;
     const ch = channelsRef.current.find((c) => c.id === currentIdRef.current);
@@ -230,29 +242,35 @@ export default function Home() {
     let stream: MediaStream;
     try {
       if (!window.isSecureContext || !navigator.mediaDevices) throw new Error("insecure");
-      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      stream = await getMic();
     } catch (err) {
       const name = (err as { name?: string })?.name;
       if (!window.isSecureContext || !navigator.mediaDevices)
         setMicError("HTTPS 주소에서만 마이크가 켜져요. https:// 로 접속하세요.");
       else if (name === "NotAllowedError")
-        setMicError("마이크 권한이 거부됐어요. 브라우저 설정에서 허용해주세요.");
+        setMicError("마이크 권한이 거부됐어요. 카카오톡·인스타 등 인앱 브라우저면 Safari/Chrome로 열어주세요.");
       else if (name === "NotFoundError")
         setMicError("마이크를 찾을 수 없어요.");
-      else setMicError("마이크를 시작할 수 없어요. 다른 앱이 쓰고 있는지 확인하세요.");
+      else setMicError("마이크를 시작할 수 없어요. 인앱 브라우저면 Safari/Chrome로 열어보세요.");
       setIsRecording(false);
       holdingRef.current = false;
       return;
     }
-    if (!holdingRef.current) { stream.getTracks().forEach((t) => t.stop()); setIsRecording(false); return; }
+    // 권한 팝업 때문에 누르는 사이 손을 뗀 경우: 스트림은 유지(프라임)하고 이번 건 스킵
+    if (!holdingRef.current) {
+      setIsRecording(false);
+      setJustSent("마이크 준비됨 · 다시 눌러 말하세요");
+      if (sentTimerRef.current) clearTimeout(sentTimerRef.current);
+      sentTimerRef.current = setTimeout(() => setJustSent(null), 2200);
+      return;
+    }
 
     chunksRef.current = [];
     const rec = new MediaRecorder(stream);
     rec.ondataavailable = (e) => e.data.size > 0 && chunksRef.current.push(e.data);
     rec.onstop = () => {
       const url = URL.createObjectURL(new Blob(chunksRef.current, { type: "audio/webm" }));
-      stream.getTracks().forEach((t) => t.stop());
-      autoSend(url);
+      autoSend(url); // 스트림은 재사용 위해 유지
     };
     rec.start();
     recorderRef.current = rec;
