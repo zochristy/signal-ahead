@@ -278,6 +278,7 @@ export default function Home() {
   const [level, setLevel] = useState(0);
   const [liveText, setLiveText] = useState("");
   const [justSent, setJustSent] = useState<string | null>(null);
+  const [flyText, setFlyText] = useState<string | null>(null); // 떼는 순간 인식 자막이 위로 날아가는 텍스트
   const [micError, setMicError] = useState<string | null>(null);
   const [activeIdx, setActiveIdx] = useState(0);
   const [calYM, setCalYM] = useState<{ y: number; m: number }>({ y: 2026, m: 1 });
@@ -288,6 +289,7 @@ export default function Home() {
   const recognitionRef = useRef<SpeechRecognition | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const finalTextRef = useRef("");
+  const liveTextRef = useRef(""); // 화면에 보이던 인식 텍스트(interim 포함) — 떼면 이걸 날림
   const holdingRef = useRef(false);
   const audioCtxRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
@@ -296,6 +298,7 @@ export default function Home() {
   const levelRef = useRef(0);
   const secRef = useRef(0);
   const sentTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const flyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const channelsRef = useRef<Channel[]>([]);
   const currentIdRef = useRef(1);
   const activeIdxRef = useRef(0);
@@ -457,7 +460,9 @@ export default function Home() {
           const r = e.results[i];
           if (r.isFinal) finalTextRef.current += r[0].transcript; else interim += r[0].transcript;
         }
-        setLiveText(finalTextRef.current + interim);
+        const shown = finalTextRef.current + interim;
+        liveTextRef.current = shown;
+        setLiveText(shown);
       };
       recog.onerror = () => {};
       recognitionRef.current = recog;
@@ -478,36 +483,47 @@ export default function Home() {
     recognitionRef.current = null;
     stopMeter();
     setIsRecording(false);
-    setLiveText(finalTextRef.current);
+    setLiveText(liveTextRef.current);
   }
 
   // 떼면 자동 전송: 미도달=송신(새 무전) / 도달=현재 카드에 음성 회신
   function autoSend(url: string) {
-    const text = finalTextRef.current.trim();
+    // 최종 인식이 없더라도 화면에 보이던 텍스트(interim 포함)를 사용
+    const text = (finalTextRef.current.trim() || liveTextRef.current.trim());
     const len = secRef.current;
-    if (!text && len < 1) { URL.revokeObjectURL(url); finalTextRef.current = ""; setLiveText(""); setSec(0); return; }
+    if (!text && len < 1) { URL.revokeObjectURL(url); finalTextRef.current = ""; liveTextRef.current = ""; setLiveText(""); setSec(0); return; }
     const cid = currentIdRef.current;
     const ch = channelsRef.current.find((c) => c.id === cid);
     if (!ch) { URL.revokeObjectURL(url); return; }
 
+    let msg: string;
     if (ch.reached) {
       const idx = activeIdxRef.current;
-      if (!ch.thread[idx]) { URL.revokeObjectURL(url); setLiveText(""); finalTextRef.current = ""; secRef.current = 0; setSec(0); return; }
+      if (!ch.thread[idx]) { URL.revokeObjectURL(url); setLiveText(""); finalTextRef.current = ""; liveTextRef.current = ""; secRef.current = 0; setSec(0); return; }
       setChannels((prev) => prev.map((c) => c.id !== cid ? c : {
         ...c, thread: c.thread.map((m, i) => i === idx ? { ...m, reply: text, replyAudio: url, replySec: len } : m),
       }));
-      setJustSent("회신 완료");
+      msg = "회신 완료";
     } else {
       setChannels((prev) => prev.map((c) => c.id !== cid ? c : {
         ...c,
         thread: [...c.thread, { id: c.thread.length + 1, day: c.daysLeft, text, audioUrl: url, sec: len }],
         daysLeft: Math.max(0, c.daysLeft - 1),
       }));
-      setJustSent(`DAY ${ch.totalDays - ch.daysLeft + 1} 송신 완료`);
+      msg = `DAY ${ch.totalDays - ch.daysLeft + 1} 송신 완료`;
     }
-    setLiveText(""); finalTextRef.current = ""; secRef.current = 0; setSec(0);
+    finalTextRef.current = ""; liveTextRef.current = ""; secRef.current = 0; setSec(0);
     if (sentTimerRef.current) clearTimeout(sentTimerRef.current);
-    sentTimerRef.current = setTimeout(() => setJustSent(null), 1800);
+    if (flyTimerRef.current) clearTimeout(flyTimerRef.current);
+
+    const showDone = () => { setJustSent(msg); sentTimerRef.current = setTimeout(() => setJustSent(null), 1800); };
+    if (text) {
+      // 인식된 자막을 위로 날려 보낸 뒤 완료 표시
+      setLiveText(""); setJustSent(null); setFlyText(text);
+      flyTimerRef.current = setTimeout(() => { setFlyText(null); showDone(); }, 1000);
+    } else {
+      setLiveText(""); showDone();
+    }
   }
 
   function stepYear(dir: 1 | -1) { setTarget((t) => clampDay({ ...t, y: Math.min(2100, Math.max(today?.y ?? 2020, t.y + dir)) })); }
@@ -659,10 +675,14 @@ export default function Home() {
                   {pad2(Math.floor(sec / 60))}:{pad2(sec % 60)} / {pad2(Math.floor(MAX_MEMO_SEC / 60))}:{pad2(MAX_MEMO_SEC % 60)}
                 </span>
               </div>
-              <p style={{ fontSize: 20, lineHeight: 1.3, textAlign: "center", margin: "5px 0 0", minHeight: 26, overflow: "hidden", color: justSent || liveText || isRecording ? c.fg : c.sub, fontWeight: justSent ? 600 : 500 }}>
-                <span key={justSent ? `sent:${justSent}` : "live"} className={justSent ? "roll-up" : undefined}>
-                  {justSent ?? (liveText || (isRecording ? (current.reached ? "회신 녹음 중… (떼면 전송)" : "송신 중… (떼면 전송)") : current.reached ? (activeLocked ? "오늘 쓴 건 내일부터 회고할 수 있어요" : "날짜를 골라 누른 채 회신") : "버튼을 누른 채 말하세요"))}
-                </span>
+              <p style={{ fontSize: 20, lineHeight: 1.3, textAlign: "center", margin: "5px 0 0", minHeight: 26, overflow: "hidden", color: justSent || flyText || liveText || isRecording ? c.fg : c.sub, fontWeight: justSent ? 600 : 500 }}>
+                {flyText != null ? (
+                  <span key={`fly:${flyText}`} className="fly-up">{flyText}</span>
+                ) : (
+                  <span key={justSent ? `sent:${justSent}` : "live"} className={justSent ? "roll-up" : undefined}>
+                    {justSent ?? (liveText || (isRecording ? (current.reached ? "회신 녹음 중… (떼면 전송)" : "송신 중… (떼면 전송)") : current.reached ? (activeLocked ? "오늘 쓴 건 내일부터 회고할 수 있어요" : "날짜를 골라 누른 채 회신") : "버튼을 누른 채 말하세요"))}
+                  </span>
+                )}
               </p>
             </div>
 

@@ -105,8 +105,17 @@ body {
 }
 .roll-up   { display: inline-block; animation: rollUp   0.34s cubic-bezier(0.2, 0.7, 0.2, 1) both; }
 .roll-down { display: inline-block; animation: rollDown 0.34s cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+
+/* 떼는 순간: 인식된 자막이 ~1초 머문 뒤 위로 올라가며 사라짐 (전송돼 날아가듯) */
+@keyframes flyUpOut {
+  0%   { transform: translateY(0);       opacity: 1; }
+  58%  { transform: translateY(0);       opacity: 1; }
+  100% { transform: translateY(-0.95em); opacity: 0; }
+}
+.fly-up { display: inline-block; animation: flyUpOut 1s cubic-bezier(0.4, 0, 0.2, 1) both; }
+
 @media (prefers-reduced-motion: reduce) {
-  .roll-up, .roll-down { animation: none; }
+  .roll-up, .roll-down, .fly-up { animation: none; }
 }
 
 /* 설정 입력창 placeholder */
