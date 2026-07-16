@@ -1,9 +1,22 @@
-@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+KR:wght@400;500;600;700&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+KR:wght@400;500;600;700&display=swap");
 @import "tailwindcss";
 
+/* ---- Cohere design system · dark ---- */
 :root {
-  --ink: #1d1d1f;
-  --hairline: rgba(0, 0, 0, 0.12);
+  --primary: #17171c; /* near-black */
+  --deep-green: #003c33;
+  --dark-navy: #071829;
+  --canvas: #ffffff;
+  --coral: #ff7759;
+  --coral-soft: #ffad9b;
+
+  --text: #ffffff;
+  --text-soft: #f7f6f3;
+  --muted: rgba(255, 255, 255, 0.55);
+  --faint: rgba(255, 255, 255, 0.06);
+  --hairline: rgba(255, 255, 255, 0.16);
+
+  --ink: #f7f6f3; /* default light text on dark bands */
 }
 
 * {
@@ -18,7 +31,9 @@ body {
 
 body {
   color: var(--ink);
-  font-family: "IBM Plex Sans KR", -apple-system, system-ui, sans-serif;
+  background: var(--primary);
+  /* Unica77 → Inter, Korean via Plex Sans KR */
+  font-family: "Inter", "IBM Plex Sans KR", -apple-system, system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
   /* 꾹 누를 때 텍스트 선택/하이라이트 방지 */
@@ -34,19 +49,37 @@ textarea {
   user-select: text;
 }
 
+/* CohereText display → Space Grotesk, tight & light-weight (not bold) */
 .h-display {
-  font-weight: 700;
-  letter-spacing: -0.02em;
+  font-family: "Space Grotesk", "IBM Plex Sans KR", -apple-system, sans-serif;
+  font-weight: 500;
+  letter-spacing: -0.03em;
   line-height: 1;
 }
 
+/* CohereMono technical labels → IBM Plex Mono */
 .mono {
   font-family: "IBM Plex Mono", "IBM Plex Sans KR", ui-monospace, Menlo,
     monospace;
   font-variant-numeric: tabular-nums;
 }
 
-/* ---- conventional components (Apple grammar) ---- */
+/* 무전기 LCD 상태 LED — 느린 점멸 */
+@keyframes lcdBlink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+.lcd-led {
+  animation: lcdBlink 2s ease-in-out infinite;
+}
+
+/* 설정 입력창 placeholder */
+.lcd-input::placeholder {
+  color: rgba(255, 255, 255, 0.32);
+  letter-spacing: 0.3px;
+}
+
+/* ---- controls (Cohere pill grammar) ---- */
 .btn {
   border: none;
   cursor: pointer;
@@ -59,66 +92,4 @@ textarea {
 .btn:disabled {
   opacity: 0.35;
   cursor: not-allowed;
-}
-
-.btn-primary {
-  background: #111;
-  color: #fff;
-  border-radius: 9999px;
-  padding: 16px 24px;
-  font-weight: 600;
-  font-size: 17px;
-  letter-spacing: -0.02em;
-  width: 100%;
-}
-
-.btn-ghost {
-  background: rgba(0, 0, 0, 0.07);
-  color: var(--ink);
-  border-radius: 9999px;
-  padding: 14px 20px;
-  font-weight: 500;
-  font-size: 16px;
-}
-
-.icon-btn {
-  width: 52px;
-  height: 52px;
-  border-radius: 9999px;
-  background: rgba(0, 0, 0, 0.08);
-  color: var(--ink);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 22px;
-  border: none;
-  cursor: pointer;
-  transition: transform 0.08s ease;
-}
-.icon-btn:active {
-  transform: scale(0.92);
-}
-
-.input {
-  width: 100%;
-  background: #fff;
-  border: 1px solid var(--hairline);
-  border-radius: 12px;
-  padding: 15px 16px;
-  font-size: 16px;
-  font-family: inherit;
-  color: var(--ink);
-}
-.input::placeholder {
-  color: rgba(0, 0, 0, 0.35);
-}
-.input:focus {
-  outline: none;
-  border-color: var(--ink);
-}
-
-.card {
-  background: #fff;
-  border: 1px solid var(--hairline);
-  border-radius: 18px;
 }

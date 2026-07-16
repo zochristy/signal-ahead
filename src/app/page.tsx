@@ -23,19 +23,34 @@ type Channel = {
   daysLeft: number;
   thread: SealedMessage[];
   reached: boolean;
+  start: YMD; // 개설일 (DAY 1)
+  target: YMD; // 목표일
 };
 
 const MAX_MEMO_SEC = 60;
 const MESH_N = 13;
 const DEFAULT_DAYS = 3;
 
-const BG_SETUP = "#2b2b2b";
-const BG_ACCRUE = "#cf5b41";
-const BG_REVIEW = "#4f8a54";
-const INK = "#1d1d1f";
-const MUTED = "rgba(0,0,0,0.42)";
-const LIGHT = "#f2f0ea";
+// Cohere: 근블랙(설정) · 딥 그린 다크밴드(송신 TX) · 밝은 캔버스(수신·회고 RX, 인버스)
+const BG_SETUP = "#17171c";
+const BG_ACCRUE = "#003c33";
+const BG_REVIEW = "#eeece7"; // soft-stone 캔버스 — 송신 다크와 인버스
+const CANVAS = "#ffffff";
+const DARK = "#17171c"; // dark fill on light surfaces (knob inner, selected day)
+const TEXT = "#ffffff";
+const LIGHT = "#f7f6f3"; // near-white text / mesh dots
+const MUTED = "rgba(255,255,255,0.55)";
 const MUTED_L = "rgba(255,255,255,0.5)";
+const FAINT = "rgba(255,255,255,0.06)"; // elevated surfaces (dark)
+const HAIR = "rgba(255,255,255,0.16)"; // hairline borders (dark)
+const CORAL = "#ff7759"; // single warm accent
+const CORAL_SOFT = "#ffad9b";
+// 밝은 회고(RX) 표면 토큰 (인버스)
+const L_FG = "#17171c";
+const L_SUB = "rgba(0,0,0,0.5)";
+const L_SURFACE = "#ffffff";
+const L_HAIR = "rgba(0,0,0,0.12)";
+const L_FAINT = "rgba(0,0,0,0.04)";
 
 const pad2 = (n: number) => String(n).padStart(2, "0");
 const fmtTime = (s: number) => `${Math.floor(s / 60)}:${pad2(Math.floor(s % 60))}`;
@@ -46,6 +61,7 @@ const plusDays = (t: YMD, n: number): YMD => {
   const d = new Date(t.y, t.m - 1, t.d + n);
   return { y: d.getFullYear(), m: d.getMonth() + 1, d: d.getDate() };
 };
+const ymdKey = (y: number, m: number, d: number) => `${y}-${m}-${d}`;
 
 // --- Web Speech API ---
 type SpeechRecognitionAlt = { transcript: string };
@@ -74,7 +90,7 @@ const MESH_GRID: ({ dist: number; local: number; seed: number } | null)[] = (() 
   return grid;
 })();
 
-function Mesh({ level, size = "min(72vw, 260px)" }: { level: number; size?: string }) {
+function Mesh({ level, size = "min(72vw, 260px)", color = LIGHT }: { level: number; size?: string; color?: string }) {
   const act = level;
   return (
     <div style={{ display: "grid", gridTemplateColumns: `repeat(${MESH_N}, 1fr)`, gridTemplateRows: `repeat(${MESH_N}, 1fr)`, width: size, aspectRatio: "1 / 1", placeItems: "center", transform: `scale(${1 + act * 0.16})`, transition: "transform 0.05s linear" }}>
@@ -83,7 +99,7 @@ function Mesh({ level, size = "min(72vw, 260px)" }: { level: number; size?: stri
         const reach = act * 1.25;
         const intensity = cell.dist <= reach ? Math.max(0.28, 1 - cell.dist / (reach + 0.001)) : 0;
         const dot = 3 + intensity * 21 + cell.seed * intensity * 6;
-        return <span key={i} style={{ width: dot, height: dot, borderRadius: "50%", background: INK, opacity: 0.2 + intensity * 0.8, transition: "width 0.05s linear, height 0.05s linear, opacity 0.05s linear" }} />;
+        return <span key={i} style={{ width: dot, height: dot, borderRadius: "50%", background: color, opacity: 0.2 + intensity * 0.8, transition: "width 0.05s linear, height 0.05s linear, opacity 0.05s linear" }} />;
       })}
     </div>
   );
@@ -100,20 +116,31 @@ function Dial({ label, value, onUp, onDown }: { label: string; value: string; on
   );
 }
 
-function ChannelBar({ channels, currentId, onPrev, onNext }: { channels: Channel[]; currentId: number; onPrev: () => void; onNext: () => void }) {
+// 채널 선택 바 — 앱 톤(다크·코랄)에 맞춘 심플한 인디케이터, 모드별 색 반전
+function ChannelBar({ channels, currentId, onPrev, onNext, mode, light }: { channels: Channel[]; currentId: number; onPrev: () => void; onNext: () => void; mode: "tx" | "rx"; light?: boolean }) {
   const idx = channels.findIndex((c) => c.id === currentId);
   const multi = channels.length > 1;
+  const fg = light ? L_FG : TEXT;
+  const sub = light ? L_SUB : MUTED;
+  const surface = light ? "rgba(0,0,0,0.05)" : "rgba(0,0,0,0.28)";
+  const hair = light ? L_HAIR : HAIR;
   return (
-    <div style={chBar}>
-      <button style={{ ...chArrow, opacity: multi ? 1 : 0.25 }} onClick={onPrev} disabled={!multi} aria-label="이전 채널">‹</button>
-      <span className="mono" style={{ fontSize: 15, fontWeight: 600, letterSpacing: 1 }}>CH.{pad2(currentId)} <span style={{ color: MUTED }}>· {idx + 1}/{channels.length}</span></span>
-      <button style={{ ...chArrow, opacity: multi ? 1 : 0.25 }} onClick={onNext} disabled={!multi} aria-label="다음 채널">›</button>
+    <div style={{ ...chanBar, background: surface, border: `1px solid ${hair}` }}>
+      <button className="btn" style={{ ...chanArrow, color: fg, opacity: multi ? 0.7 : 0.2 }} onClick={onPrev} disabled={!multi} aria-label="이전 채널">‹</button>
+      <div style={chanCenter}>
+        <div style={{ display: "inline-flex", alignItems: "baseline", gap: 8 }}>
+          <span className="mono" style={{ fontSize: 18, fontWeight: 600, letterSpacing: 1.5, color: fg }}>CH {pad2(currentId)}</span>
+          <span className="mono" style={{ fontSize: 11, fontWeight: 600, letterSpacing: 1, color: CORAL }}>{mode.toUpperCase()}</span>
+        </div>
+        <span className="mono" style={{ fontSize: 10, letterSpacing: 1, color: sub }}>{idx + 1} / {channels.length}</span>
+      </div>
+      <button className="btn" style={{ ...chanArrow, color: fg, opacity: multi ? 0.7 : 0.2 }} onClick={onNext} disabled={!multi} aria-label="다음 채널">›</button>
     </div>
   );
 }
 
 // 컴팩트 음성 재생 버튼
-function VoiceButton({ src, dur, accent, label = "음성 듣기" }: { src: string; dur: number; accent: string; label?: string }) {
+function VoiceButton({ src, dur, accent, label = "음성 듣기", light }: { src: string; dur: number; accent: string; label?: string; light?: boolean }) {
   const ref = useRef<HTMLAudioElement>(null);
   const [playing, setPlaying] = useState(false);
   const [cur, setCur] = useState(0);
@@ -134,10 +161,95 @@ function VoiceButton({ src, dur, accent, label = "음성 듣기" }: { src: strin
     else a.play().then(() => setPlaying(true)).catch(() => {});
   };
   return (
-    <button onClick={toggle} style={voicePill}>
+    <button onClick={toggle} style={{ ...voicePill, background: light ? L_FAINT : "rgba(255,255,255,0.10)", border: `1px solid ${light ? L_HAIR : HAIR}`, color: light ? L_FG : TEXT }}>
       <audio ref={ref} src={src} preload="metadata" />
       <span style={{ ...voiceDot, background: accent }}>{playing ? "❚❚" : "▶"}</span>
-      <span className="mono" style={{ fontSize: 13 }}>{playing ? fmtTime(cur) : label} <span style={{ color: MUTED }}>/ {fmtTime(d)}</span></span>
+      <span className="mono" style={{ fontSize: 13 }}>{playing ? fmtTime(cur) : label} <span style={{ color: light ? L_SUB : MUTED }}>/ {fmtTime(d)}</span></span>
+    </button>
+  );
+}
+
+// 회고 달력: 무전 있는 날 coral 점, 탭하면 그 날 무전 선택
+function MiniCalendar({ channel, selectedIdx, onSelect, calYM, onMonth }: {
+  channel: Channel; selectedIdx: number; onSelect: (i: number) => void;
+  calYM: { y: number; m: number }; onMonth: (dir: 1 | -1) => void;
+}) {
+  const marks = new Map<string, number>();
+  channel.thread.forEach((m, i) => {
+    const k = channel.totalDays - m.day + 1; // DAY 순번
+    const d = plusDays(channel.start, k - 1);
+    marks.set(ymdKey(d.y, d.m, d.d), i);
+  });
+  const startKey = ymdKey(channel.start.y, channel.start.m, channel.start.d);
+  const targetKey = ymdKey(channel.target.y, channel.target.m, channel.target.d);
+  const { y, m } = calYM;
+  const firstDow = new Date(y, m - 1, 1).getDay();
+  const days = daysInMonth(y, m);
+  const cells: (number | null)[] = [];
+  for (let i = 0; i < firstDow; i++) cells.push(null);
+  for (let d = 1; d <= days; d++) cells.push(d);
+  const WD = ["일", "월", "화", "수", "목", "금", "토"];
+
+  return (
+    <div style={calCard}>
+      <div style={calHead}>
+        <button style={calArrow} onClick={() => onMonth(-1)} aria-label="이전 달">‹</button>
+        <span className="mono" style={{ fontSize: 13, letterSpacing: 1 }}>{y} · {m}월</span>
+        <button style={calArrow} onClick={() => onMonth(1)} aria-label="다음 달">›</button>
+      </div>
+      <div style={calWeekRow}>{WD.map((w) => <span key={w} style={calWeekCell}>{w}</span>)}</div>
+      <div style={calGrid}>
+        {cells.map((d, i) => {
+          if (d == null) return <span key={i} />;
+          const key = ymdKey(y, m, d);
+          const idx = marks.get(key);
+          const has = idx !== undefined;
+          const sel = has && idx === selectedIdx;
+          const isTarget = key === targetKey;
+          const isStart = key === startKey;
+          return (
+            <button
+              key={i}
+              className="btn"
+              onClick={() => has && onSelect(idx!)}
+              disabled={!has}
+              style={{
+                ...calDay,
+                cursor: has ? "pointer" : "default",
+                background: sel ? CORAL : "transparent",
+                color: sel ? "#fff" : has ? L_FG : "rgba(0,0,0,0.28)",
+                border: (isTarget || isStart) && !sel ? `1px solid ${L_HAIR}` : "1px solid transparent",
+                fontWeight: has ? 600 : 400,
+              }}
+              aria-label={has ? `${m}월 ${d}일 무전 보기` : `${m}월 ${d}일`}
+            >
+              {d}
+              {has && !sel && <span style={calDot} />}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// 송신(TX) ↔ 수신(RX) 무전기 토글 스위치: 누르면 반대 모드로 슬라이드
+function TxRxSwitch({ mode, onToggle, disabled, light }: { mode: "tx" | "rx"; onToggle: () => void; disabled?: boolean; light?: boolean }) {
+  const rx = mode === "rx";
+  const led = (on: boolean): React.CSSProperties => ({ width: 7, height: 7, borderRadius: "50%", background: on ? CORAL : (light ? "rgba(0,0,0,0.2)" : "rgba(255,255,255,0.22)"), boxShadow: on ? `0 0 7px ${CORAL}` : "none", flexShrink: 0, transition: "all 0.2s ease" });
+  const trackBg = light ? "rgba(0,0,0,0.06)" : "rgba(0,0,0,0.28)";
+  const underColor = light ? L_FG : TEXT;
+  const knobBg = light ? DARK : CANVAS;
+  const knobFg = light ? "#fff" : DARK;
+  return (
+    <button className="btn" onClick={() => !disabled && onToggle()} disabled={disabled} style={{ ...txTrack, background: trackBg, border: `1px solid ${light ? L_HAIR : HAIR}` }} aria-label={rx ? "송신(TX) 모드로 전환" : "수신·회고(RX) 모드로 전환"}>
+      <span style={{ ...txUnder, left: 0, color: underColor, opacity: rx ? 0.5 : 0 }}><span style={led(false)} /><span className="mono">TX</span></span>
+      <span style={{ ...txUnder, right: 0, color: underColor, opacity: rx ? 0 : 0.5 }}><span className="mono">RX</span><span style={led(false)} /></span>
+      <span style={{ ...txKnob, background: knobBg, color: knobFg, transform: rx ? "translateX(100%)" : "translateX(0)" }}>
+        {rx
+          ? (<><span className="mono">RX · 수신</span><span style={led(true)} /></>)
+          : (<><span style={led(true)} /><span className="mono">TX · 송신</span></>)}
+      </span>
     </button>
   );
 }
@@ -158,8 +270,8 @@ export default function Home() {
   const [justSent, setJustSent] = useState<string | null>(null);
   const [micError, setMicError] = useState<string | null>(null);
   const [activeIdx, setActiveIdx] = useState(0);
+  const [calYM, setCalYM] = useState<{ y: number; m: number }>({ y: 2026, m: 1 });
 
-  const carouselRef = useRef<HTMLDivElement>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const chunksRef = useRef<Blob[]>([]);
@@ -197,9 +309,43 @@ export default function Home() {
 
   const current = channels.find((c) => c.id === currentId) ?? null;
   const bg = view === "setup" ? BG_SETUP : current?.reached ? BG_REVIEW : BG_ACCRUE;
-  const accent = current?.reached ? BG_REVIEW : BG_ACCRUE;
+  const accent = CORAL;
   const progress = current && current.totalDays > 0 ? Math.round(((current.totalDays - current.daysLeft) / current.totalDays) * 100) : 0;
   const nextChNo = (channels.length ? Math.max(...channels.map((c) => c.id)) : 0) + 1;
+
+  // 도착 시: 마지막 무전을 선택하고 달력을 그 달로 이동
+  const reached = current?.reached ?? false;
+  const threadLen = current?.thread.length ?? 0;
+
+  // 송신(TX) 다크 ↔ 수신·회고(RX) 밝은 캔버스 인버스
+  const lightMode = reached;
+  const c = lightMode
+    ? { fg: L_FG, sub: L_SUB, surface: L_SURFACE, faint: L_FAINT, hair: L_HAIR, knob: DARK, knobInner: LIGHT }
+    : { fg: TEXT, sub: MUTED, surface: FAINT, faint: FAINT, hair: HAIR, knob: CANVAS, knobInner: DARK };
+
+  // 상태바(theme-color)를 현재 밴드 색과 동기화
+  useEffect(() => {
+    const meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) meta.setAttribute("content", bg);
+  }, [bg]);
+  useEffect(() => {
+    if (!current || !reached || threadLen === 0) return;
+    const last = threadLen - 1;
+    const k = current.totalDays - current.thread[last].day + 1;
+    const d = plusDays(current.start, k - 1);
+    setCalYM({ y: d.y, m: d.m });
+    setActiveIdx(last);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentId, reached, threadLen]);
+
+  function stepCalMonth(dir: 1 | -1) {
+    setCalYM(({ y, m }) => {
+      let mm = m + dir, yy = y;
+      if (mm > 12) { mm = 1; yy++; }
+      if (mm < 1) { mm = 12; yy--; }
+      return { y: yy, m: mm };
+    });
+  }
 
   function tick() {
     const analyser = analyserRef.current, data = dataRef.current;
@@ -330,6 +476,7 @@ export default function Home() {
 
     if (ch.reached) {
       const idx = activeIdxRef.current;
+      if (!ch.thread[idx]) { URL.revokeObjectURL(url); setLiveText(""); finalTextRef.current = ""; secRef.current = 0; setSec(0); return; }
       setChannels((prev) => prev.map((c) => c.id !== cid ? c : {
         ...c, thread: c.thread.map((m, i) => i === idx ? { ...m, reply: text, replyAudio: url, replySec: len } : m),
       }));
@@ -347,20 +494,6 @@ export default function Home() {
     sentTimerRef.current = setTimeout(() => setJustSent(null), 1800);
   }
 
-  function onCarouselScroll() {
-    const el = carouselRef.current;
-    if (!el) return;
-    const center = el.scrollLeft + el.clientWidth / 2;
-    let best = 0, bestD = Infinity;
-    Array.from(el.children).forEach((ch, i) => {
-      const node = ch as HTMLElement;
-      const c = node.offsetLeft + node.offsetWidth / 2;
-      const dd = Math.abs(c - center);
-      if (dd < bestD) { bestD = dd; best = i; }
-    });
-    setActiveIdx(best);
-  }
-
   function stepYear(dir: 1 | -1) { setTarget((t) => clampDay({ ...t, y: Math.min(2100, Math.max(today?.y ?? 2020, t.y + dir)) })); }
   function stepMonth(dir: 1 | -1) { setTarget((t) => { let m = t.m + dir, y = t.y; if (m > 12) { m = 1; y++; } if (m < 1) { m = 12; y--; } return clampDay({ y, m, d: t.d }); }); }
   function stepDay(dir: 1 | -1) { setTarget((t) => { const max = daysInMonth(t.y, t.m); let d = t.d + dir; if (d < 1) d = max; if (d > max) d = 1; return { ...t, d }; }); }
@@ -368,12 +501,11 @@ export default function Home() {
   function createChannel() {
     if (!goal.trim() || !validDate) return;
     const id = channels.length ? Math.max(...channels.map((c) => c.id)) + 1 : 1;
-    setChannels((prev) => [...prev, { id, goal: goal.trim(), totalDays: totalDaysToTarget, daysLeft: totalDaysToTarget, thread: [], reached: false }]);
+    setChannels((prev) => [...prev, { id, goal: goal.trim(), totalDays: totalDaysToTarget, daysLeft: totalDaysToTarget, thread: [], reached: false, start: today ?? { ...target }, target: { ...target } }]);
     setCurrentId(id); setView("run"); setGoal("");
     if (today) setTarget(plusDays(today, DEFAULT_DAYS));
   }
   function newChannelForm() { setGoal(""); if (today) setTarget(plusDays(today, DEFAULT_DAYS)); setView("setup"); }
-  function continueRun() { const un = channels.find((c) => !c.reached); if (un) { setCurrentId(un.id); setView("run"); } else newChannelForm(); }
 
   function switchChannel(dir: 1 | -1) {
     if (channels.length < 2) return;
@@ -381,9 +513,13 @@ export default function Home() {
     const i = ids.indexOf(currentId);
     setCurrentId(ids[(i + dir + ids.length) % ids.length]);
     setActiveIdx(0);
-    if (carouselRef.current) carouselRef.current.scrollLeft = 0;
   }
-  function reachTarget() { setChannels((prev) => prev.map((c) => c.id === currentId ? { ...c, reached: true, daysLeft: 0 } : c)); setActiveIdx(0); }
+  // 송신(TX) ↔ 수신·회고(RX) 자유 전환 — daysLeft(카운트다운)는 유지
+  function toggleMode() {
+    if (isRecording) return;
+    setChannels((prev) => prev.map((c) => c.id === currentId ? { ...c, reached: !c.reached } : c));
+    setActiveIdx(0);
+  }
 
   const dayLabel = (ch: Channel, m: SealedMessage) => ch.totalDays - m.day + 1;
 
@@ -394,35 +530,33 @@ export default function Home() {
         {view === "setup" && (
           <div style={{ ...colFill, color: LIGHT }}>
             <header>
-              <h1 className="h-display" style={{ fontSize: 44, margin: 0 }}>시간<br />무전</h1>
+              <h1 className="h-display" style={{ fontSize: 44, margin: 0 }}>Signal<br />Ahead</h1>
               <p style={{ fontSize: 16, color: MUTED_L, margin: "10px 0 0" }}>{channels.length ? `새 채널 CH.${pad2(nextChNo)} 개설` : "미래의 나에게 봉인 송신"}</p>
             </header>
 
-            <div style={{ display: "grid", gap: 10 }}>
-              <span style={{ ...eyebrow, color: MUTED_L }}>CHANNEL — 목표</span>
-              <div style={{ ...channelDisplay, border: "1px solid rgba(255,255,255,0.14)" }}>
-                <span className="mono" style={chTag}>CH.{pad2(nextChNo)}</span>
-                <input value={goal} onChange={(e) => setGoal(e.target.value)} placeholder="도달한 미래의 나를 입력" style={channelInput} className="mono" />
-                <span style={{ width: 8, height: 8, borderRadius: "50%", background: goal.trim() ? "#7dd87d" : "rgba(255,255,255,0.25)", flexShrink: 0 }} />
+            <div style={lcdSetupPanel}>
+              <div style={lcdFieldRow}>
+                <span className="mono" style={lcdSetupTag}>CH.{pad2(nextChNo)}</span>
+                <input value={goal} onChange={(e) => setGoal(e.target.value)} placeholder="도달한 미래의 나를 입력" style={lcdInput} className="mono lcd-input" />
+                <span style={{ width: 7, height: 7, borderRadius: "50%", background: goal.trim() ? CORAL : "rgba(255,255,255,0.2)", flexShrink: 0 }} />
               </div>
             </div>
 
-            <div style={{ display: "grid", gap: 10 }}>
-              <span style={{ ...eyebrow, color: MUTED_L }}>TARGET DATE — 목표 날짜</span>
-              <div style={dialRowDark}>
+            <div style={lcdSetupPanel}>
+              <div style={dialRowLcd}>
                 <Dial label="년" value={String(target.y)} onUp={() => stepYear(1)} onDown={() => stepYear(-1)} />
-                <span style={dialSepDark}>/</span>
+                <span style={dialSepLcd}>/</span>
                 <Dial label="월" value={pad2(target.m)} onUp={() => stepMonth(1)} onDown={() => stepMonth(-1)} />
-                <span style={dialSepDark}>/</span>
+                <span style={dialSepLcd}>/</span>
                 <Dial label="일" value={pad2(target.d)} onUp={() => stepDay(1)} onDown={() => stepDay(-1)} />
               </div>
-              <p style={{ margin: 0, fontSize: 13, color: validDate ? MUTED_L : "#f0a08f", textAlign: "center" }}>
-                {today == null ? " " : validDate ? `봉인 기간 · ${totalDaysToTarget}일 (D-${totalDaysToTarget})` : "미래의 날짜를 선택하세요"}
+              <p className="mono" style={{ margin: 0, fontSize: 12, letterSpacing: 0.5, color: validDate ? MUTED_L : CORAL_SOFT, textAlign: "center", borderTop: `1px solid ${HAIR}`, paddingTop: 10 }}>
+                {today == null ? " " : validDate ? `송신 기간 · ${totalDaysToTarget}일  ·  D-${totalDaysToTarget}` : "미래의 날짜를 선택하세요"}
               </p>
             </div>
 
             <div style={{ marginTop: "auto", display: "grid", gap: 10 }}>
-              <button className="btn" onClick={createChannel} disabled={!goal.trim() || !validDate} style={{ ...primaryBtn, background: LIGHT, color: INK }}>{channels.length ? "채널 개설 →" : "무전 시작 →"}</button>
+              <button className="btn" onClick={createChannel} disabled={!goal.trim() || !validDate} style={{ ...primaryBtn, background: LIGHT, color: DARK }}>{channels.length ? "채널 개설 →" : "무전 시작 →"}</button>
               {channels.length > 0 && <button className="btn" onClick={() => setView("run")} style={{ ...ghostBtn, width: "100%", background: "rgba(255,255,255,0.12)", color: LIGHT }}>기존 채널로 돌아가기</button>}
             </div>
           </div>
@@ -430,99 +564,96 @@ export default function Home() {
 
         {/* ============ RUN ============ */}
         {view === "run" && current && (
-          <div style={colFillTight}>
-            <ChannelBar channels={channels} currentId={currentId} onPrev={() => switchChannel(-1)} onNext={() => switchChannel(1)} />
+          <div style={{ ...colFillTight, color: c.fg }}>
+            {/* 상단: 무전기 LCD 채널 디스플레이 + 새 채널 */}
+            <div style={{ display: "flex", gap: 10, alignItems: "stretch" }}>
+              <ChannelBar channels={channels} currentId={currentId} onPrev={() => switchChannel(-1)} onNext={() => switchChannel(1)} mode={current.reached ? "rx" : "tx"} light={lightMode} />
+              <button className="btn" onClick={newChannelForm} disabled={isRecording} aria-label="새 채널" style={{ ...newChBtn, background: lightMode ? "rgba(0,0,0,0.05)" : "rgba(0,0,0,0.28)", color: c.fg, border: `1px solid ${c.hair}` }}>＋</button>
+            </div>
 
             {/* 헤더 (송신/수신 공통 구조, 색만 다름) */}
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginTop: 10 }}>
               <div>
-                <h1 className="h-display" style={{ fontSize: 28, margin: 0 }}>{current.reached ? "미래의 나" : "지금의 나"}</h1>
-                <p style={{ fontSize: 14, color: MUTED, margin: "5px 0 0", maxWidth: 210 }}>{current.goal}</p>
+                <h1 className="h-display" style={{ fontSize: 28, margin: 0, maxWidth: 210 }}>{current.goal}</h1>
+                <p style={{ fontSize: 14, color: c.sub, margin: "5px 0 0" }}>{current.reached ? "미래의 나" : "지금의 나"}</p>
               </div>
               <div style={{ textAlign: "right" }}>
-                <div className="h-display" style={{ fontSize: 26 }}>{current.reached ? "도착" : `D-${current.daysLeft}`}</div>
-                <div className="mono" style={{ fontSize: 12, color: MUTED }}>{current.reached ? `${current.thread.length}개` : `${progress}% · ${current.thread.length}개`}</div>
+                <div className="h-display" style={{ fontSize: 26 }}>{current.daysLeft > 0 ? `D-${current.daysLeft}` : "도착"}</div>
+                <div className="mono" style={{ fontSize: 12, color: c.sub }}>{current.reached ? `${current.thread.length}개 · 회고` : `${progress}% · ${current.thread.length}개`}</div>
               </div>
             </div>
 
-            {/* 도달 시: 이전 무전 카드 스트립 (가로 스와이프) */}
-            {current.reached && current.thread.length > 0 && (
-              <>
-                <div ref={carouselRef} onScroll={onCarouselScroll} style={carouselStrip}>
-                  {current.thread.map((m, i) => {
-                    const isActive = i === activeIdx;
+            {/* 도착: 달력으로 되돌아보기 + 선택한 날 무전 상세 */}
+            {current.reached ? (
+              current.thread.length === 0 ? (
+                <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", minHeight: 0 }}>
+                  <p style={{ fontSize: 14, color: c.sub }}>수신된 무전이 없어요.</p>
+                </div>
+              ) : (
+                <div style={{ flex: 1, minHeight: 0, overflowY: "auto", display: "flex", flexDirection: "column", gap: 12 }}>
+                  <MiniCalendar channel={current} selectedIdx={activeIdx} onSelect={setActiveIdx} calYM={calYM} onMonth={stepCalMonth} />
+                  {(() => {
+                    const sm = current.thread[activeIdx];
+                    if (!sm) return <p style={{ fontSize: 13, color: c.sub, textAlign: "center", margin: "4px 0 0" }}>날짜를 눌러 그 날의 무전을 열어보세요</p>;
                     return (
-                      <div key={m.id} style={{ ...snapCard, opacity: isActive ? 1 : 0.72, transform: isActive && isRecording ? `scale(${1 + level * 0.05})` : "scale(1)", boxShadow: isActive && isRecording ? `0 0 0 3px rgba(0,0,0,0.35)` : "none", transition: "box-shadow 0.1s, transform 0.05s, opacity 0.2s" }}>
-                        <div className="mono" style={{ fontSize: 12, color: MUTED }}>DAY {dayLabel(current, m)}의 나 {isActive && <span style={{ color: accent, fontWeight: 700 }}>· 선택됨</span>}</div>
-                        <p style={{ fontSize: 18, lineHeight: 1.5, fontWeight: 500, margin: "10px 0 0" }}>{m.text || <span style={{ color: MUTED }}>(음성 메시지)</span>}</p>
-                        {m.audioUrl && <div style={{ marginTop: 12 }}><VoiceButton src={m.audioUrl} dur={m.sec} accent={INK} /></div>}
-                        <div style={{ marginTop: "auto", paddingTop: 12 }}>
-                          {m.reply || m.replyAudio ? (
-                            <div style={{ borderTop: "1px solid rgba(0,0,0,0.18)", paddingTop: 10 }}>
-                              <div className="mono" style={{ fontSize: 11, color: accent, fontWeight: 700, marginBottom: 6 }}>미래의 나 · 회신</div>
-                              {m.reply && <p style={{ fontSize: 14, margin: "0 0 8px", lineHeight: 1.4 }}>{m.reply}</p>}
-                              {m.replyAudio && <VoiceButton src={m.replyAudio} dur={m.replySec ?? 0} accent={accent} label="회신 듣기" />}
-                            </div>
+                      <div style={{ ...detailCard, transform: isRecording ? `scale(${1 + level * 0.03})` : "scale(1)", boxShadow: isRecording ? `0 0 0 2px ${CORAL}` : "none", transition: "transform 0.05s, box-shadow 0.1s" }}>
+                        <div className="mono" style={{ fontSize: 12, color: CORAL, letterSpacing: 0.5 }}>DAY {dayLabel(current, sm)}의 나</div>
+                        <p style={{ fontSize: 17, lineHeight: 1.5, margin: "8px 0 0" }}>{sm.text || <span style={{ color: L_SUB }}>(음성 메시지)</span>}</p>
+                        {sm.audioUrl && <div style={{ marginTop: 12 }}><VoiceButton src={sm.audioUrl} dur={sm.sec} accent={CORAL} light /></div>}
+                        <div style={{ marginTop: 12, borderTop: `1px solid ${L_HAIR}`, paddingTop: 10 }}>
+                          {sm.reply || sm.replyAudio ? (
+                            <>
+                              <div className="mono" style={{ fontSize: 11, color: CORAL, fontWeight: 700, marginBottom: 6 }}>미래의 나 · 회신</div>
+                              {sm.reply && <p style={{ fontSize: 14, margin: "0 0 8px", lineHeight: 1.4 }}>{sm.reply}</p>}
+                              {sm.replyAudio && <VoiceButton src={sm.replyAudio} dur={sm.replySec ?? 0} accent={CORAL} label="회신 듣기" light />}
+                            </>
                           ) : (
-                            <p className="mono" style={{ fontSize: 12, color: MUTED, margin: 0 }}>{isActive ? "아래 버튼을 누른 채 회신하세요" : "스와이프해 이 무전을 선택"}</p>
+                            <p className="mono" style={{ fontSize: 12, color: L_SUB, margin: 0 }}>아래 버튼을 눌러 이 무전에 회신</p>
                           )}
                         </div>
                       </div>
                     );
-                  })}
+                  })()}
                 </div>
-                <div style={dotsRow}>
-                  {current.thread.map((_, i) => <span key={i} style={{ height: 6, borderRadius: 3, transition: "all 0.2s", width: i === activeIdx ? 18 : 6, background: i === activeIdx ? INK : "rgba(0,0,0,0.22)" }} />)}
-                </div>
-              </>
+              )
+            ) : (
+              /* 송신: 스피커 메시 (음성 반응) */
+              <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", minHeight: 0 }}>
+                <Mesh level={level} color={LIGHT} size="min(72vw, 260px)" />
+              </div>
             )}
-
-            {/* 스피커 메시 (음성 반응) — 송신·수신 공통, 수신은 작게 */}
-            <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", minHeight: 0 }}>
-              {current.reached && current.thread.length === 0
-                ? <p style={{ fontSize: 14, color: MUTED }}>수신된 무전이 없어요.</p>
-                : <Mesh level={level} size={current.reached ? "min(42vw, 150px)" : "min(72vw, 260px)"} />}
-            </div>
 
             {/* 타이머 + 상태 */}
             <div>
               <div style={{ textAlign: "center" }}>
-                <span className="mono" style={{ fontSize: 14, color: MUTED, letterSpacing: 1 }}>
+                <span className="mono" style={{ fontSize: 14, color: c.sub, letterSpacing: 1 }}>
                   {pad2(Math.floor(sec / 60))}:{pad2(sec % 60)} / {pad2(Math.floor(MAX_MEMO_SEC / 60))}:{pad2(MAX_MEMO_SEC % 60)}
                 </span>
               </div>
-              <p style={{ fontSize: 17, lineHeight: 1.4, textAlign: "center", margin: "8px 0 0", minHeight: 24, color: justSent || liveText || isRecording ? INK : MUTED, fontWeight: justSent ? 700 : 400 }}>
-                {justSent ?? (liveText || (isRecording ? (current.reached ? "회신 녹음 중… (떼면 전송)" : "송신 중… (떼면 전송)") : current.reached ? "카드를 골라 누른 채 회신" : "버튼을 누른 채 말하세요"))}
+              <p style={{ fontSize: 22, lineHeight: 1.35, textAlign: "center", margin: "8px 0 0", minHeight: 30, color: justSent || liveText || isRecording ? c.fg : c.sub, fontWeight: justSent ? 600 : 500 }}>
+                {justSent ?? (liveText || (isRecording ? (current.reached ? "회신 녹음 중… (떼면 전송)" : "송신 중… (떼면 전송)") : current.reached ? "날짜를 골라 누른 채 회신" : "버튼을 누른 채 말하세요"))}
               </p>
             </div>
 
-            {micError && <p style={{ fontSize: 12, color: "#5a1a10", textAlign: "center", margin: 0 }}>{micError}</p>}
+            {micError && <p style={{ fontSize: 12, color: lightMode ? "#b30000" : CORAL_SOFT, textAlign: "center", margin: 0 }}>{micError}</p>}
 
             {/* PUSH-TO-TALK */}
-            <div style={{ display: "flex", justifyContent: "center" }}>
+            <div style={{ display: "flex", justifyContent: "center", margin: "8px 0 16px" }}>
               <button
                 onPointerDown={(e) => { e.preventDefault(); e.currentTarget.setPointerCapture(e.pointerId); startRecording(); }}
                 onPointerUp={() => stopRecording()}
                 onPointerCancel={() => stopRecording()}
                 onContextMenu={(e) => e.preventDefault()}
-                style={{ ...talkKnob, transform: isRecording ? "scale(0.94)" : "scale(1)" }}
+                style={{ ...talkKnob, background: c.knob, transform: isRecording ? "scale(0.94)" : "scale(1)" }}
               >
-                <span style={{ width: isRecording ? 26 : 22, height: isRecording ? 26 : 22, borderRadius: isRecording ? 5 : "50%", background: isRecording ? accent : "#fff", transition: "all 0.15s ease" }} />
+                <span style={{ width: isRecording ? 26 : 22, height: isRecording ? 26 : 22, borderRadius: isRecording ? 5 : "50%", background: isRecording ? accent : c.knobInner, transition: "all 0.15s ease" }} />
               </button>
             </div>
 
-            {/* 하단 액션 */}
-            {!current.reached ? (
-              <div style={{ display: "flex", gap: 10 }}>
-                <button className="btn" onClick={reachTarget} disabled={isRecording} style={{ ...ghostBtn, flex: 1 }}>목표일로 가기 ▸</button>
-                <button className="btn" onClick={newChannelForm} disabled={isRecording} style={ghostBtn}>+ 새 채널</button>
-              </div>
-            ) : (
-              <div style={{ display: "flex", gap: 10 }}>
-                <button className="btn" onClick={newChannelForm} disabled={isRecording} style={{ ...ghostBtn, flex: 1 }}>새 목표</button>
-                <button className="btn" onClick={continueRun} disabled={isRecording} style={{ ...ghostBtn, whiteSpace: "nowrap" }}>이어서하기</button>
-              </div>
-            )}
+            {/* 하단 액션 — TX↔RX 토글 (전체 폭) */}
+            <div style={{ display: "flex", alignItems: "stretch" }}>
+              <TxRxSwitch mode={current.reached ? "rx" : "tx"} onToggle={toggleMode} disabled={isRecording} light={lightMode} />
+            </div>
           </div>
         )}
       </main>
@@ -532,34 +663,53 @@ export default function Home() {
 
 // ---- 스타일 ----
 const shell: React.CSSProperties = { height: "100dvh", display: "flex", justifyContent: "center", overflow: "hidden", transition: "background 0.4s ease" };
-const main: React.CSSProperties = { width: "100%", maxWidth: 420, height: "100%", padding: "26px 22px calc(20px + env(safe-area-inset-bottom))", display: "flex", flexDirection: "column", boxSizing: "border-box" };
+const main: React.CSSProperties = { width: "100%", maxWidth: 420, height: "100%", padding: "22px 22px calc(48px + env(safe-area-inset-bottom))", display: "flex", flexDirection: "column", boxSizing: "border-box" };
 const colFill: React.CSSProperties = { flex: 1, display: "flex", flexDirection: "column", gap: 16, minHeight: 0 };
 const colFillTight: React.CSSProperties = { flex: 1, display: "flex", flexDirection: "column", gap: 12, minHeight: 0 };
 
-const eyebrow: React.CSSProperties = { fontSize: 11, fontWeight: 700, letterSpacing: 1.5, color: MUTED, textTransform: "uppercase" };
 
-const primaryBtn: React.CSSProperties = { background: INK, color: "#fff", border: "none", borderRadius: 9999, padding: "16px 22px", fontSize: 17, fontWeight: 600, letterSpacing: "-0.01em", width: "100%", cursor: "pointer" };
-const ghostBtn: React.CSSProperties = { background: "rgba(0,0,0,0.10)", color: INK, border: "none", borderRadius: 9999, padding: "15px 18px", fontSize: 15, fontWeight: 600, cursor: "pointer" };
+// Cohere pill CTA — white on dark bands
+const primaryBtn: React.CSSProperties = { background: LIGHT, color: DARK, border: "none", borderRadius: 32, padding: "16px 24px", fontSize: 16, fontWeight: 500, letterSpacing: "-0.01em", width: "100%", cursor: "pointer" };
+const ghostBtn: React.CSSProperties = { background: FAINT, color: TEXT, border: `1px solid ${HAIR}`, borderRadius: 32, padding: "15px 18px", fontSize: 15, fontWeight: 500, cursor: "pointer" };
 
-const chBar: React.CSSProperties = { display: "flex", alignItems: "center", justifyContent: "space-between", background: "rgba(0,0,0,0.08)", borderRadius: 12, padding: "6px 12px", flexShrink: 0 };
-const chArrow: React.CSSProperties = { width: 40, height: 32, border: "none", background: "transparent", color: INK, fontSize: 22, cursor: "pointer", lineHeight: 1 };
+// 채널 선택 바 (심플)
+const chanBar: React.CSSProperties = { display: "flex", alignItems: "center", flex: 1, minWidth: 0, borderRadius: 12, overflow: "hidden", padding: "0 4px" };
+const chanArrow: React.CSSProperties = { width: 34, height: 48, border: "none", background: "transparent", fontSize: 22, cursor: "pointer", lineHeight: 1, flexShrink: 0 };
+const chanCenter: React.CSSProperties = { flex: 1, minWidth: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 2, padding: "9px 4px" };
+const newChBtn: React.CSSProperties = { width: 54, flexShrink: 0, borderRadius: 12, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 24, fontWeight: 400, cursor: "pointer", lineHeight: 1 };
 
-const channelDisplay: React.CSSProperties = { display: "flex", alignItems: "center", gap: 12, background: INK, borderRadius: 14, padding: "18px 18px" };
-const chTag: React.CSSProperties = { fontSize: 12, fontWeight: 700, color: "#7dd87d", letterSpacing: 1, flexShrink: 0 };
-const channelInput: React.CSSProperties = { flex: 1, minWidth: 0, background: "transparent", border: "none", outline: "none", color: "#fff", fontSize: 18, letterSpacing: 0.3 };
 
-const dialRowDark: React.CSSProperties = { display: "flex", alignItems: "center", justifyContent: "center", gap: 6, background: "rgba(255,255,255,0.08)", borderRadius: 16, padding: "14px 10px" };
+const dialRowLcd: React.CSSProperties = { display: "flex", alignItems: "center", justifyContent: "center", gap: 6, padding: "4px 4px 12px" };
 const dialCol: React.CSSProperties = { display: "flex", flexDirection: "column", alignItems: "center", gap: 6, flex: 1 };
-const dialValue: React.CSSProperties = { fontSize: 30, fontWeight: 700, letterSpacing: 0.5, lineHeight: 1 };
-const dialUnit: React.CSSProperties = { fontSize: 11, color: MUTED_L, fontWeight: 600 };
-const dialSepDark: React.CSSProperties = { fontSize: 22, color: "rgba(255,255,255,0.28)", fontWeight: 300, marginTop: -14 };
-const triBtn: React.CSSProperties = { border: "none", background: "transparent", color: "currentColor", fontSize: 13, cursor: "pointer", padding: 4, lineHeight: 1 };
+const dialValue: React.CSSProperties = { fontSize: 30, fontWeight: 500, letterSpacing: 1, lineHeight: 1, color: TEXT };
+const dialUnit: React.CSSProperties = { fontSize: 11, color: MUTED_L, fontWeight: 500 };
+const dialSepLcd: React.CSSProperties = { fontSize: 22, color: "rgba(255,255,255,0.28)", fontWeight: 300, marginTop: -14 };
+const triBtn: React.CSSProperties = { border: "none", background: "transparent", color: TEXT, opacity: 0.55, fontSize: 13, cursor: "pointer", padding: 4, lineHeight: 1 };
 
-const talkKnob: React.CSSProperties = { width: 86, height: 86, borderRadius: "50%", border: "none", background: INK, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", touchAction: "none", userSelect: "none", transition: "transform 0.1s ease", boxShadow: "0 6px 18px rgba(0,0,0,0.22)" };
+// 설정 패널 (목표·날짜) — 앱 톤에 맞춘 심플한 다크 카드
+const lcdSetupPanel: React.CSSProperties = { background: "rgba(0,0,0,0.22)", border: `1px solid ${HAIR}`, borderRadius: 14, padding: "14px 16px", display: "flex", flexDirection: "column", gap: 10 };
+const lcdSetupTag: React.CSSProperties = { fontSize: 12, fontWeight: 600, letterSpacing: 1, color: CORAL, flexShrink: 0 };
+const lcdFieldRow: React.CSSProperties = { display: "flex", alignItems: "center", gap: 12 };
+const lcdInput: React.CSSProperties = { flex: 1, minWidth: 0, background: "transparent", border: "none", outline: "none", color: TEXT, fontSize: 18, letterSpacing: 0.3 };
 
-const carouselStrip: React.CSSProperties = { position: "relative", height: 172, flexShrink: 0, display: "flex", gap: 12, overflowX: "auto", overflowY: "hidden", scrollSnapType: "x mandatory", scrollbarWidth: "none", WebkitOverflowScrolling: "touch" };
-const snapCard: React.CSSProperties = { scrollSnapAlign: "center", flex: "0 0 84%", display: "flex", flexDirection: "column", padding: 16, overflowY: "auto", background: "rgba(0,0,0,0.13)", borderRadius: 16, color: INK };
-const dotsRow: React.CSSProperties = { display: "flex", gap: 6, justifyContent: "center", alignItems: "center", flexShrink: 0 };
+const talkKnob: React.CSSProperties = { width: 86, height: 86, borderRadius: "50%", border: "none", background: CANVAS, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", touchAction: "none", userSelect: "none", transition: "transform 0.1s ease", boxShadow: "0 6px 20px rgba(0,0,0,0.35)" };
 
-const voicePill: React.CSSProperties = { display: "inline-flex", alignItems: "center", gap: 10, background: "rgba(255,255,255,0.4)", border: "none", borderRadius: 9999, padding: "8px 14px 8px 8px", cursor: "pointer", color: INK };
+// 회고 달력 (밝은 캔버스 · 인버스)
+const calCard: React.CSSProperties = { background: L_SURFACE, border: `1px solid ${L_HAIR}`, borderRadius: 22, padding: 16, flexShrink: 0, color: L_FG };
+const calHead: React.CSSProperties = { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 };
+const calArrow: React.CSSProperties = { width: 32, height: 28, border: "none", background: "transparent", color: L_FG, fontSize: 20, cursor: "pointer", lineHeight: 1 };
+const calWeekRow: React.CSSProperties = { display: "grid", gridTemplateColumns: "repeat(7, 1fr)", marginBottom: 4 };
+const calWeekCell: React.CSSProperties = { textAlign: "center", fontSize: 10, color: L_SUB, padding: "2px 0" };
+const calGrid: React.CSSProperties = { display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 2 };
+const calDay: React.CSSProperties = { position: "relative", height: 34, display: "flex", alignItems: "center", justifyContent: "center", borderRadius: 8, fontSize: 13, background: "transparent", padding: 0 };
+const calDot: React.CSSProperties = { position: "absolute", bottom: 5, left: "50%", transform: "translateX(-50%)", width: 4, height: 4, borderRadius: "50%", background: CORAL };
+
+const detailCard: React.CSSProperties = { background: L_SURFACE, border: `1px solid ${L_HAIR}`, borderRadius: 16, padding: 16, color: L_FG };
+
+// TX→RX 무전기 스위치
+const txTrack: React.CSSProperties = { position: "relative", flex: 1, height: 54, borderRadius: 32, background: "rgba(0,0,0,0.28)", border: `1px solid ${HAIR}`, cursor: "pointer", overflow: "hidden", padding: 0, display: "block" };
+const txUnder: React.CSSProperties = { position: "absolute", top: 0, bottom: 0, width: "50%", display: "flex", alignItems: "center", justifyContent: "center", gap: 6, fontSize: 13, letterSpacing: 1, color: TEXT, transition: "opacity 0.3s ease" };
+const txKnob: React.CSSProperties = { position: "absolute", top: 3, bottom: 3, left: 3, width: "calc(50% - 3px)", borderRadius: 28, background: CANVAS, color: DARK, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, fontSize: 13, fontWeight: 500, letterSpacing: 0.5, transition: "transform 0.36s cubic-bezier(0.5, 0, 0.2, 1)", boxShadow: "0 3px 12px rgba(0,0,0,0.4)" };
+
+const voicePill: React.CSSProperties = { display: "inline-flex", alignItems: "center", gap: 10, background: "rgba(255,255,255,0.10)", border: `1px solid ${HAIR}`, borderRadius: 9999, padding: "8px 14px 8px 8px", cursor: "pointer", color: TEXT };
 const voiceDot: React.CSSProperties = { width: 26, height: 26, borderRadius: "50%", color: "#fff", fontSize: 11, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 };
