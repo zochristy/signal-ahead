@@ -140,7 +140,7 @@ function ChannelBar({ channels, currentId, onPrev, onNext, mode, light }: { chan
 }
 
 // 컴팩트 음성 재생 버튼
-function VoiceButton({ src, dur, accent, label = "음성 듣기", light }: { src: string; dur: number; accent: string; label?: string; light?: boolean }) {
+function VoiceButton({ src, dur, accent, label = "음성 듣기", light, compact }: { src: string; dur: number; accent: string; label?: string; light?: boolean; compact?: boolean }) {
   const ref = useRef<HTMLAudioElement>(null);
   const [playing, setPlaying] = useState(false);
   const [cur, setCur] = useState(0);
@@ -160,6 +160,15 @@ function VoiceButton({ src, dur, accent, label = "음성 듣기", light }: { src
     if (playing) { a.pause(); setPlaying(false); }
     else a.play().then(() => setPlaying(true)).catch(() => {});
   };
+  if (compact) {
+    return (
+      <span style={{ display: "inline-flex", alignItems: "center", gap: 7 }}>
+        <audio ref={ref} src={src} preload="metadata" />
+        <button onClick={toggle} aria-label={label} style={{ ...voiceDot, ...voiceDotBtn, background: accent }}>{playing ? "❚❚" : "▶"}</button>
+        <span className="mono" style={{ fontSize: 11, color: light ? L_SUB : MUTED }}>{playing ? fmtTime(cur) : fmtTime(d)}</span>
+      </span>
+    );
+  }
   return (
     <button onClick={toggle} style={{ ...voicePill, background: light ? L_FAINT : "rgba(255,255,255,0.10)", border: `1px solid ${light ? L_HAIR : HAIR}`, color: light ? L_FG : TEXT }}>
       <audio ref={ref} src={src} preload="metadata" />
@@ -256,6 +265,7 @@ function TxRxSwitch({ mode, onToggle, disabled, light }: { mode: "tx" | "rx"; on
 
 export default function Home() {
   const [view, setView] = useState<View>("setup");
+  const [flipping, setFlipping] = useState(false);
   const [channels, setChannels] = useState<Channel[]>([]);
   const [currentId, setCurrentId] = useState<number>(1);
 
@@ -380,6 +390,12 @@ export default function Home() {
     if (isRecording) return;
     const ch = channelsRef.current.find((c) => c.id === currentIdRef.current);
     if (!ch) return;
+    // 당일(최신 DAY) 무전은 회신도 잠금 — 내일 열림
+    if (ch.reached) {
+      const sm = ch.thread[activeIdxRef.current];
+      const latest = ch.thread.length ? Math.max(...ch.thread.map((m) => ch.totalDays - m.day + 1)) : 0;
+      if (sm && ch.totalDays - sm.day + 1 === latest) { setMicError("당일 무전은 내일 열려요. 회신도 그때 가능해요."); return; }
+    }
     holdingRef.current = true;
     setMicError(null); setLiveText(""); setJustSent(null);
     finalTextRef.current = ""; secRef.current = 0; setSec(0);
@@ -516,12 +532,22 @@ export default function Home() {
   }
   // 송신(TX) ↔ 수신·회고(RX) 자유 전환 — daysLeft(카운트다운)는 유지
   function toggleMode() {
-    if (isRecording) return;
-    setChannels((prev) => prev.map((c) => c.id === currentId ? { ...c, reached: !c.reached } : c));
-    setActiveIdx(0);
+    if (isRecording || flipping) return;
+    setFlipping(true);
+    // 90°(엣지-온, ≈50%)에서 TX↔RX 내용 스왑 → 뒤집힌 반대 면이 드러남
+    window.setTimeout(() => {
+      setChannels((prev) => prev.map((c) => c.id === currentId ? { ...c, reached: !c.reached } : c));
+      setActiveIdx(0);
+    }, 305);
+    window.setTimeout(() => setFlipping(false), 640);
   }
 
   const dayLabel = (ch: Channel, m: SealedMessage) => ch.totalDays - m.day + 1;
+
+  // 당일(가장 최근에 녹음한 무전)은 회고에서 재생·회신 모두 잠금 — 내일 열림
+  const latestDayLabel = current && current.thread.length ? Math.max(...current.thread.map((m) => dayLabel(current, m))) : 0;
+  const activeSm = current?.reached ? current.thread[activeIdx] : undefined;
+  const activeLocked = !!(activeSm && dayLabel(current!, activeSm) === latestDayLabel);
 
   return (
     <div style={{ ...shell, background: bg }}>
@@ -537,7 +563,7 @@ export default function Home() {
             <div style={lcdSetupPanel}>
               <div style={lcdFieldRow}>
                 <span className="mono" style={lcdSetupTag}>CH.{pad2(nextChNo)}</span>
-                <input value={goal} onChange={(e) => setGoal(e.target.value)} placeholder="도달한 미래의 나를 입력" style={lcdInput} className="mono lcd-input" />
+                <input value={goal} onChange={(e) => setGoal(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.nativeEvent.isComposing) { e.preventDefault(); e.currentTarget.blur(); } }} enterKeyHint="done" placeholder="도달한 미래의 나를 입력" style={lcdInput} className="mono lcd-input" />
                 <span style={{ width: 7, height: 7, borderRadius: "50%", background: goal.trim() ? CORAL : "rgba(255,255,255,0.2)", flexShrink: 0 }} />
               </div>
             </div>
@@ -564,7 +590,7 @@ export default function Home() {
 
         {/* ============ RUN ============ */}
         {view === "run" && current && (
-          <div style={{ ...colFillTight, color: c.fg }}>
+          <div className={`no-select${flipping ? " radio-flip" : ""}`} style={{ ...colFillTight, color: c.fg }}>
             {/* 상단: 무전기 LCD 채널 디스플레이 + 새 채널 */}
             <div style={{ display: "flex", gap: 10, alignItems: "stretch" }}>
               <ChannelBar channels={channels} currentId={currentId} onPrev={() => switchChannel(-1)} onNext={() => switchChannel(1)} mode={current.reached ? "rx" : "tx"} light={lightMode} />
@@ -595,17 +621,20 @@ export default function Home() {
                   {(() => {
                     const sm = current.thread[activeIdx];
                     if (!sm) return <p style={{ fontSize: 13, color: c.sub, textAlign: "center", margin: "4px 0 0" }}>날짜를 눌러 그 날의 무전을 열어보세요</p>;
+                    const locked = activeLocked;
                     return (
                       <div style={{ ...detailCard, transform: isRecording ? `scale(${1 + level * 0.03})` : "scale(1)", boxShadow: isRecording ? `0 0 0 2px ${CORAL}` : "none", transition: "transform 0.05s, box-shadow 0.1s" }}>
-                        <div className="mono" style={{ fontSize: 12, color: CORAL, letterSpacing: 0.5 }}>DAY {dayLabel(current, sm)}의 나</div>
-                        <p style={{ fontSize: 17, lineHeight: 1.5, margin: "8px 0 0" }}>{sm.text || <span style={{ color: L_SUB }}>(음성 메시지)</span>}</p>
-                        {sm.audioUrl && <div style={{ marginTop: 12 }}><VoiceButton src={sm.audioUrl} dur={sm.sec} accent={CORAL} light /></div>}
-                        <div style={{ marginTop: 12, borderTop: `1px solid ${L_HAIR}`, paddingTop: 10 }}>
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                          <div className="mono" style={{ fontSize: 12, color: CORAL, letterSpacing: 0.5 }}>DAY {dayLabel(current, sm)}의 나</div>
+                          {sm.audioUrl && !locked && <VoiceButton src={sm.audioUrl} dur={sm.sec} accent={CORAL} light compact />}
+                        </div>
+                        <p style={preview}>{sm.text || <span style={{ color: L_SUB }}>(음성 메시지)</span>}</p>
+                        <div style={{ marginTop: 10, borderTop: `1px solid ${L_HAIR}`, paddingTop: 10 }}>
                           {sm.reply || sm.replyAudio ? (
                             <>
                               <div className="mono" style={{ fontSize: 11, color: CORAL, fontWeight: 700, marginBottom: 6 }}>미래의 나 · 회신</div>
                               {sm.reply && <p style={{ fontSize: 14, margin: "0 0 8px", lineHeight: 1.4 }}>{sm.reply}</p>}
-                              {sm.replyAudio && <VoiceButton src={sm.replyAudio} dur={sm.replySec ?? 0} accent={CORAL} label="회신 듣기" light />}
+                              {sm.replyAudio && <VoiceButton src={sm.replyAudio} dur={sm.replySec ?? 0} accent={CORAL} label="회신 듣기" light compact />}
                             </>
                           ) : (
                             <p className="mono" style={{ fontSize: 12, color: L_SUB, margin: 0 }}>아래 버튼을 눌러 이 무전에 회신</p>
@@ -631,7 +660,7 @@ export default function Home() {
                 </span>
               </div>
               <p style={{ fontSize: 20, lineHeight: 1.3, textAlign: "center", margin: "5px 0 0", minHeight: 26, color: justSent || liveText || isRecording ? c.fg : c.sub, fontWeight: justSent ? 600 : 500 }}>
-                {justSent ?? (liveText || (isRecording ? (current.reached ? "회신 녹음 중… (떼면 전송)" : "송신 중… (떼면 전송)") : current.reached ? "날짜를 골라 누른 채 회신" : "버튼을 누른 채 말하세요"))}
+                {justSent ?? (liveText || (isRecording ? (current.reached ? "회신 녹음 중… (떼면 전송)" : "송신 중… (떼면 전송)") : current.reached ? (activeLocked ? "오늘 쓴 건 내일부터 회고할 수 있어요" : "날짜를 골라 누른 채 회신") : "버튼을 누른 채 말하세요"))}
               </p>
             </div>
 
@@ -640,11 +669,13 @@ export default function Home() {
             {/* PUSH-TO-TALK */}
             <div style={{ display: "flex", justifyContent: "center", margin: "4px 0 8px" }}>
               <button
-                onPointerDown={(e) => { e.preventDefault(); e.currentTarget.setPointerCapture(e.pointerId); startRecording(); }}
+                onPointerDown={(e) => { if (activeLocked) return; e.preventDefault(); e.currentTarget.setPointerCapture(e.pointerId); startRecording(); }}
                 onPointerUp={() => stopRecording()}
                 onPointerCancel={() => stopRecording()}
                 onContextMenu={(e) => e.preventDefault()}
-                style={{ ...talkKnob, background: c.knob, transform: isRecording ? "scale(0.94)" : "scale(1)" }}
+                disabled={activeLocked}
+                aria-label={activeLocked ? "당일 무전은 회신 불가" : "누른 채 회신"}
+                style={{ ...talkKnob, background: c.knob, transform: isRecording ? "scale(0.94)" : "scale(1)", opacity: activeLocked ? 0.4 : 1, cursor: activeLocked ? "not-allowed" : "pointer" }}
               >
                 <span style={{ width: isRecording ? 24 : 20, height: isRecording ? 24 : 20, borderRadius: isRecording ? 5 : "50%", background: isRecording ? accent : c.knobInner, transition: "all 0.15s ease" }} />
               </button>
@@ -663,8 +694,10 @@ export default function Home() {
 
 // ---- 스타일 ----
 const shell: React.CSSProperties = { height: "100dvh", display: "flex", justifyContent: "center", overflow: "hidden", transition: "background 0.4s ease" };
-const main: React.CSSProperties = { width: "100%", maxWidth: 420, height: "100%", padding: "16px 20px calc(16px + env(safe-area-inset-bottom))", display: "flex", flexDirection: "column", boxSizing: "border-box" };
-const colFill: React.CSSProperties = { flex: 1, display: "flex", flexDirection: "column", gap: 16, minHeight: 0 };
+// perspective는 flip 대상(RUN div)의 '바로 위 부모'인 main에 걸어야 3D가 먹는다.
+// (shell에 걸면 중간 main이 3D 컨텍스트를 평평하게 눌러 perspective가 안 닿음)
+const main: React.CSSProperties = { width: "100%", maxWidth: 420, height: "100%", padding: "16px 20px calc(16px + env(safe-area-inset-bottom))", display: "flex", flexDirection: "column", boxSizing: "border-box", perspective: 900, perspectiveOrigin: "50% 45%" };
+const colFill: React.CSSProperties = { flex: 1, display: "flex", flexDirection: "column", gap: 16, minHeight: 0, overflowY: "auto" };
 const colFillTight: React.CSSProperties = { flex: 1, display: "flex", flexDirection: "column", gap: 8, minHeight: 0 };
 
 
@@ -705,6 +738,7 @@ const calDay: React.CSSProperties = { position: "relative", height: 30, display:
 const calDot: React.CSSProperties = { position: "absolute", bottom: 3, left: "50%", transform: "translateX(-50%)", width: 4, height: 4, borderRadius: "50%", background: CORAL };
 
 const detailCard: React.CSSProperties = { background: L_SURFACE, border: `1px solid ${L_HAIR}`, borderRadius: 16, padding: 14, color: L_FG };
+const preview: React.CSSProperties = { fontSize: 14, lineHeight: 1.45, margin: "8px 0 0", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" };
 
 // TX→RX 무전기 스위치
 const txTrack: React.CSSProperties = { position: "relative", flex: 1, height: 48, borderRadius: 28, background: "rgba(0,0,0,0.28)", border: `1px solid ${HAIR}`, cursor: "pointer", overflow: "hidden", padding: 0, display: "block" };
@@ -713,3 +747,4 @@ const txKnob: React.CSSProperties = { position: "absolute", top: 3, bottom: 3, l
 
 const voicePill: React.CSSProperties = { display: "inline-flex", alignItems: "center", gap: 10, background: "rgba(255,255,255,0.10)", border: `1px solid ${HAIR}`, borderRadius: 9999, padding: "8px 14px 8px 8px", cursor: "pointer", color: TEXT };
 const voiceDot: React.CSSProperties = { width: 26, height: 26, borderRadius: "50%", color: "#fff", fontSize: 11, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 };
+const voiceDotBtn: React.CSSProperties = { width: 24, height: 24, border: "none", padding: 0, cursor: "pointer" };

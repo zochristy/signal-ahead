@@ -36,15 +36,17 @@ body {
   font-family: "Inter", "IBM Plex Sans KR", -apple-system, system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
-  /* 꾹 누를 때 텍스트 선택/하이라이트 방지 */
+}
+
+/* 꾹 누를 때 텍스트 선택/하이라이트 방지 — 입력창 없는 실행 화면에만.
+   (body 전체에 user-select:none 을 걸면 iOS Safari 에서 input 입력이 막힘) */
+.no-select {
   -webkit-user-select: none;
   user-select: none;
   -webkit-touch-callout: none;
 }
-
-/* 입력창은 선택·편집 가능하게 예외 */
-input,
-textarea {
+.no-select input,
+.no-select textarea {
   -webkit-user-select: text;
   user-select: text;
 }
@@ -71,6 +73,25 @@ textarea {
 }
 .lcd-led {
   animation: lcdBlink 2s ease-in-out infinite;
+}
+
+/* TX ↔ RX 전환: 무전기를 뒤집는 하프 플립.
+   평면이 도는 "종잇장" 느낌을 피하려고 — 돌면서 뒤로 물러나고(translateZ)
+   옆면에서 어두워지게(brightness) 해 부피·조명이 있는 물체처럼 보이게 함. */
+@keyframes radioFlip {
+  0%   { transform: translateZ(0) rotateY(0deg);      filter: brightness(1); }
+  48%  { transform: translateZ(-75px) rotateY(90deg);   filter: brightness(0.82); }
+  52%  { transform: translateZ(-75px) rotateY(-90deg);  filter: brightness(0.82); }
+  100% { transform: translateZ(0) rotateY(0deg);      filter: brightness(1); }
+}
+.radio-flip {
+  animation: radioFlip 0.62s cubic-bezier(0.45, 0.05, 0.25, 1) both;
+  transform-style: preserve-3d;
+  backface-visibility: hidden;
+  will-change: transform, filter;
+}
+@media (prefers-reduced-motion: reduce) {
+  .radio-flip { animation: none; }
 }
 
 /* 설정 입력창 placeholder */
