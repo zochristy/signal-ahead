@@ -598,13 +598,13 @@ export default function Home() {
             </div>
 
             {/* 헤더 (송신/수신 공통 구조, 색만 다름) */}
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginTop: 4 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginTop: 2 }}>
               <div>
-                <h1 className="h-display" style={{ fontSize: 24, margin: 0, maxWidth: 210 }}>{current.goal}</h1>
+                <h1 className="h-display" style={{ fontSize: 22, margin: 0, maxWidth: 210 }}>{current.goal}</h1>
                 <p style={{ fontSize: 13, color: c.sub, margin: "3px 0 0" }}>{current.reached ? "미래의 나" : "지금의 나"}</p>
               </div>
               <div style={{ textAlign: "right" }}>
-                <div className="h-display" style={{ fontSize: 22 }}>{current.daysLeft > 0 ? `D-${current.daysLeft}` : "도착"}</div>
+                <div className="h-display" style={{ fontSize: 22, overflow: "hidden" }}><span key={current.daysLeft} className="roll-down">{current.daysLeft > 0 ? `D-${current.daysLeft}` : "도착"}</span></div>
                 <div className="mono" style={{ fontSize: 12, color: c.sub }}>{current.reached ? `${current.thread.length}개 · 회고` : `${progress}% · ${current.thread.length}개`}</div>
               </div>
             </div>
@@ -616,7 +616,7 @@ export default function Home() {
                   <p style={{ fontSize: 14, color: c.sub }}>수신된 무전이 없어요.</p>
                 </div>
               ) : (
-                <div style={{ flex: 1, minHeight: 0, overflowY: "auto", display: "flex", flexDirection: "column", gap: 8 }}>
+                <div style={{ flex: 1, minHeight: 0, overflowY: "auto", display: "flex", flexDirection: "column", gap: 6 }}>
                   <MiniCalendar channel={current} selectedIdx={activeIdx} onSelect={setActiveIdx} calYM={calYM} onMonth={stepCalMonth} />
                   {(() => {
                     const sm = current.thread[activeIdx];
@@ -629,7 +629,7 @@ export default function Home() {
                           {sm.audioUrl && !locked && <VoiceButton src={sm.audioUrl} dur={sm.sec} accent={CORAL} light compact />}
                         </div>
                         <p style={preview}>{sm.text || <span style={{ color: L_SUB }}>(음성 메시지)</span>}</p>
-                        <div style={{ marginTop: 10, borderTop: `1px solid ${L_HAIR}`, paddingTop: 10 }}>
+                        <div style={{ marginTop: 8, borderTop: `1px solid ${L_HAIR}`, paddingTop: 8 }}>
                           {sm.reply || sm.replyAudio ? (
                             <>
                               <div className="mono" style={{ fontSize: 11, color: CORAL, fontWeight: 700, marginBottom: 6 }}>미래의 나 · 회신</div>
@@ -659,8 +659,10 @@ export default function Home() {
                   {pad2(Math.floor(sec / 60))}:{pad2(sec % 60)} / {pad2(Math.floor(MAX_MEMO_SEC / 60))}:{pad2(MAX_MEMO_SEC % 60)}
                 </span>
               </div>
-              <p style={{ fontSize: 20, lineHeight: 1.3, textAlign: "center", margin: "5px 0 0", minHeight: 26, color: justSent || liveText || isRecording ? c.fg : c.sub, fontWeight: justSent ? 600 : 500 }}>
-                {justSent ?? (liveText || (isRecording ? (current.reached ? "회신 녹음 중… (떼면 전송)" : "송신 중… (떼면 전송)") : current.reached ? (activeLocked ? "오늘 쓴 건 내일부터 회고할 수 있어요" : "날짜를 골라 누른 채 회신") : "버튼을 누른 채 말하세요"))}
+              <p style={{ fontSize: 20, lineHeight: 1.3, textAlign: "center", margin: "5px 0 0", minHeight: 26, overflow: "hidden", color: justSent || liveText || isRecording ? c.fg : c.sub, fontWeight: justSent ? 600 : 500 }}>
+                <span key={justSent ? `sent:${justSent}` : "live"} className={justSent ? "roll-up" : undefined}>
+                  {justSent ?? (liveText || (isRecording ? (current.reached ? "회신 녹음 중… (떼면 전송)" : "송신 중… (떼면 전송)") : current.reached ? (activeLocked ? "오늘 쓴 건 내일부터 회고할 수 있어요" : "날짜를 골라 누른 채 회신") : "버튼을 누른 채 말하세요"))}
+                </span>
               </p>
             </div>
 
@@ -728,16 +730,16 @@ const lcdInput: React.CSSProperties = { flex: 1, minWidth: 0, background: "trans
 const talkKnob: React.CSSProperties = { width: 74, height: 74, borderRadius: "50%", border: "none", background: CANVAS, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", touchAction: "none", userSelect: "none", transition: "transform 0.1s ease", boxShadow: "0 6px 20px rgba(0,0,0,0.35)" };
 
 // 회고 달력 (밝은 캔버스 · 인버스)
-const calCard: React.CSSProperties = { background: L_SURFACE, border: `1px solid ${L_HAIR}`, borderRadius: 18, padding: 12, flexShrink: 0, color: L_FG };
-const calHead: React.CSSProperties = { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 };
+const calCard: React.CSSProperties = { background: L_SURFACE, border: `1px solid ${L_HAIR}`, borderRadius: 16, padding: "9px 11px", flexShrink: 0, color: L_FG };
+const calHead: React.CSSProperties = { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 3 };
 const calArrow: React.CSSProperties = { width: 32, height: 26, border: "none", background: "transparent", color: L_FG, fontSize: 20, cursor: "pointer", lineHeight: 1 };
 const calWeekRow: React.CSSProperties = { display: "grid", gridTemplateColumns: "repeat(7, 1fr)", marginBottom: 2 };
 const calWeekCell: React.CSSProperties = { textAlign: "center", fontSize: 10, color: L_SUB, padding: "1px 0" };
 const calGrid: React.CSSProperties = { display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 2 };
-const calDay: React.CSSProperties = { position: "relative", height: 30, display: "flex", alignItems: "center", justifyContent: "center", borderRadius: 8, fontSize: 13, background: "transparent", padding: 0 };
+const calDay: React.CSSProperties = { position: "relative", height: 26, display: "flex", alignItems: "center", justifyContent: "center", borderRadius: 8, fontSize: 13, background: "transparent", padding: 0 };
 const calDot: React.CSSProperties = { position: "absolute", bottom: 3, left: "50%", transform: "translateX(-50%)", width: 4, height: 4, borderRadius: "50%", background: CORAL };
 
-const detailCard: React.CSSProperties = { background: L_SURFACE, border: `1px solid ${L_HAIR}`, borderRadius: 16, padding: 14, color: L_FG };
+const detailCard: React.CSSProperties = { background: L_SURFACE, border: `1px solid ${L_HAIR}`, borderRadius: 14, padding: 12, color: L_FG };
 const preview: React.CSSProperties = { fontSize: 14, lineHeight: 1.45, margin: "8px 0 0", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" };
 
 // TX→RX 무전기 스위치

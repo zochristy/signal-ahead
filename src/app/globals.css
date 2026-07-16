@@ -94,6 +94,21 @@ body {
   .radio-flip { animation: none; }
 }
 
+/* 값 바뀔 때 엘레베이터 숫자처럼 위/아래로 슬라이드 + 페이드 (key 변경으로 재생) */
+@keyframes rollUp {
+  from { transform: translateY(0.6em);  opacity: 0; }
+  to   { transform: translateY(0);      opacity: 1; }
+}
+@keyframes rollDown {
+  from { transform: translateY(-0.6em); opacity: 0; }
+  to   { transform: translateY(0);      opacity: 1; }
+}
+.roll-up   { display: inline-block; animation: rollUp   0.34s cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+.roll-down { display: inline-block; animation: rollDown 0.34s cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+@media (prefers-reduced-motion: reduce) {
+  .roll-up, .roll-down { animation: none; }
+}
+
 /* 설정 입력창 placeholder */
 .lcd-input::placeholder {
   color: rgba(255, 255, 255, 0.32);
